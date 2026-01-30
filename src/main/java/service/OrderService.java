@@ -58,7 +58,7 @@ public class OrderService {
                     orderItemRepository.addItem(
                             conn,
                             orderId,
-                            menuItem.getId(),     // Long -> long (auto-unboxing)
+                            menuItem.getId(),
                             req.getQuantity(),
                             menuItem.getPrice()
                     );
