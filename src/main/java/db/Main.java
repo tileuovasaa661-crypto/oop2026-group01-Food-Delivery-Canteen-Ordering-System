@@ -4,15 +4,16 @@ import exception.InvalidQuantityException;
 import exception.MenuItemNotAvailableException;
 import exception.OrderNotFoundException;
 import model.MenuItem;
+import model.OrderType;
 import repository.MenuItemRepository;
 import repository.OrderItemRepository;
 import repository.OrderRepository;
 import service.MenuService;
-import service.OrderRequestItem;
+import service.OrderBuilder;
 import service.OrderService;
 import service.PaymentService;
+import util.Result;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
 
@@ -57,11 +58,10 @@ public class Main {
                     default -> System.out.println("Unknown option. Try again.");
                 }
             } catch (MenuItemNotAvailableException | InvalidQuantityException | OrderNotFoundException e) {
-                System.out.println("x" + e.getMessage());
+                System.out.println("x " + e.getMessage());
             } catch (Exception e) {
                 System.out.println("Unexpected error: " + e.getMessage());
             }
-
 
             System.out.println();
         }
@@ -103,21 +103,44 @@ public class Main {
 
         long customerId = readLong("Enter customerId: ");
 
+        System.out.println("Choose order type: 1=PICKUP, 2=DELIVERY, 3=DINE_IN");
+        int t = readInt("type: ");
+
+        OrderType type = switch (t) {
+            case 2 -> OrderType.DELIVERY;
+            case 3 -> OrderType.DINE_IN;
+            default -> OrderType.PICKUP;
+        };
+
+        String address = null;
+        if (type == OrderType.DELIVERY) {
+            System.out.print("Enter delivery address: ");
+            address = sc.nextLine().trim();
+        }
+
         System.out.println("Add items to order.");
         System.out.println("Tip: use option 4 (Show menu items) to see menuItem ids.");
 
-        List<OrderRequestItem> items = new ArrayList<>();
+        OrderBuilder builder = new OrderBuilder()
+                .customer(customerId)
+                .type(type)
+                .address(address);
 
         while (true) {
             long menuItemId = readLong("menuItemId (0 to finish): ");
             if (menuItemId == 0) break;
 
             int quantity = readInt("quantity: ");
-            items.add(new OrderRequestItem(menuItemId, quantity));
+            builder.addItem(menuItemId, quantity);
         }
+        
+        Result<Long> result = orderService.placeOrderV2(builder.build());
 
-        long orderId = orderService.placeOrder(customerId, items);
-        System.out.println("Order placed successfully. orderId=" + orderId);
+        if (result.isOk()) {
+            System.out.println("Order placed successfully. orderId=" + result.getData());
+        } else {
+            System.out.println("x " + result.getError());
+        }
     }
 
     private void viewActiveOrdersFlow() {
@@ -130,7 +153,7 @@ public class Main {
         }
 
         for (OrderService.OrderDetails od : active) {
-            var o = od.getOrder();
+            var o = od.order();
 
             System.out.printf("Order id=%d | customerId=%d | status=%s | createdAt=%s%n",
                     o.getId(),
@@ -139,11 +162,11 @@ public class Main {
                     o.getCreatedAt()
             );
 
-            if (od.getItems().isEmpty()) {
+            if (od.items().isEmpty()) {
                 System.out.println("(no items)");
             } else {
                 System.out.println("Items:");
-                for (var it : od.getItems()) {
+                for (var it : od.items()) {
                     System.out.printf("   - orderItemId=%d | menuItemId=%d | qty=%d | priceAtOrder=%s%n",
                             it.getId(),
                             it.getMenuItemId(),
@@ -163,7 +186,6 @@ public class Main {
         orderService.markOrderCompleted(orderId);
         System.out.println("Order completed. orderId=" + orderId);
     }
-
 
     private int readInt(String prompt) {
         while (true) {

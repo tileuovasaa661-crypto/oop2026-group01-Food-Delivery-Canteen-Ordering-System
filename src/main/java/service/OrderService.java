@@ -1,14 +1,18 @@
 package service;
 
 import db.DatabaseConnection;
-import exception.InvalidQuantityException;
 import exception.OrderNotFoundException;
 import model.MenuItem;
 import model.Order;
 import model.OrderItem;
 import repository.OrderItemRepository;
 import repository.OrderRepository;
+import service.delivery.DeliveryFactory;
+import service.delivery.DeliveryOption;
+import service.pricing.PricingService;
+import util.Result;
 
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -31,58 +35,79 @@ public class OrderService {
         this.paymentService = paymentService;
     }
 
-    public long placeOrder(long customerId, List<OrderRequestItem> items) {
+    public Result<Long> placeOrderV2(OrderRequest req) {
 
-        if (customerId <= 0) {
-            throw new IllegalArgumentException("Invalid customerId: " + customerId);
+        if (req == null) {
+            return Result.fail("Request is null");
         }
-        if (items == null || items.isEmpty()) {
-            throw new InvalidQuantityException("Order must contain at least one item.");
+
+        if (req.getCustomerId() <= 0) {
+            return Result.fail("Invalid customerId: " + req.getCustomerId());
         }
+
+        if (req.getItems() == null || req.getItems().isEmpty()) {
+            return Result.fail("Order must contain at least one item.");
+        }
+
+        boolean hasInvalidQty = req.getItems().stream().anyMatch(i -> i.getQuantity() <= 0);
+        if (hasInvalidQty) {
+            return Result.fail("Quantity must be > 0");
+        }
+
+        DeliveryOption option = DeliveryFactory.create(req.getOrderType());
+
+        if (option.requiresAddress() && (req.getAddress() == null || req.getAddress().isBlank())) {
+            return Result.fail("Address is required for DELIVERY");
+        }
+
+        PricingService pricingService = new PricingService();
 
         try (Connection conn = DatabaseConnection.getConnection()) {
             conn.setAutoCommit(false);
 
             try {
-                long orderId = orderRepository.create(conn, customerId);
+                long orderId = orderRepository.create(conn, req.getCustomerId());
 
-                for (OrderRequestItem req : items) {
-                    if (req.getQuantity() <= 0) {
-                        throw new InvalidQuantityException(
-                                "Invalid quantity for menuItemId=" + req.getMenuItemId() + ": " + req.getQuantity()
-                        );
-                    }
+                BigDecimal itemsTotal = BigDecimal.ZERO;
 
-                    MenuItem menuItem = menuService.getAvailableMenuItem(req.getMenuItemId());
+                for (OrderRequestItem item : req.getItems()) {
+                    MenuItem menuItem = menuService.getAvailableMenuItem(item.getMenuItemId());
 
                     orderItemRepository.addItem(
                             conn,
                             orderId,
                             menuItem.getId(),
-                            req.getQuantity(),
+                            item.getQuantity(),
                             menuItem.getPrice()
                     );
+
+                    itemsTotal = itemsTotal.add(
+                            menuItem.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()))
+                    );
                 }
+
+                BigDecimal finalTotal = pricingService.applyFeesAndTax(itemsTotal, option);
+                System.out.println("OrderType=" + option.code() + " finalTotal=" + finalTotal);
 
                 paymentService.pay(orderId);
 
                 conn.commit();
-                return orderId;
+                return Result.ok(orderId);
 
             } catch (RuntimeException e) {
                 conn.rollback();
-                throw e;
+                return Result.fail(e.getMessage());
 
             } catch (SQLException e) {
                 conn.rollback();
-                throw new RuntimeException("SQL error while placing order", e);
+                return Result.fail("SQL error while placing order");
 
             } finally {
                 conn.setAutoCommit(true);
             }
 
         } catch (SQLException e) {
-            throw new RuntimeException("DB connection error", e);
+            return Result.fail("DB connection error");
         }
     }
 
@@ -135,16 +160,6 @@ public class OrderService {
         }
     }
 
-    public static class OrderDetails {
-        private final Order order;
-        private final List<OrderItem> items;
-
-        public OrderDetails(Order order, List<OrderItem> items) {
-            this.order = order;
-            this.items = items;
-        }
-
-        public Order getOrder() { return order; }
-        public List<OrderItem> getItems() { return items; }
+    public record OrderDetails(Order order, List<OrderItem> items) {
     }
 }
