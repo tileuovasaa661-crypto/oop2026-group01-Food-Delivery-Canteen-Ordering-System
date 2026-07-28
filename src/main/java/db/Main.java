@@ -13,6 +13,8 @@ import service.OrderBuilder;
 import service.OrderService;
 import service.PaymentService;
 import util.Result;
+import model.BaseEntity;
+import model.Customer;
 
 import java.util.List;
 import java.util.Scanner;
@@ -37,13 +39,18 @@ public class Main {
     public static void main(String[] args) {
         new Main().run();
     }
-
     private void run() {
         System.out.println("=== Canteen Ordering System ===");
+
+        // Demonstration of polymorphism
+        BaseEntity customer = new Customer(1L, "Saya", "87001234567");
+        customer.displayInfo();
 
         while (true) {
             printMenu();
             int choice = readInt("Choose option: ");
+
+
 
             try {
                 switch (choice) {
